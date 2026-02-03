@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>問題演習・模擬試験ツール</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --ink: #1c1b19;
+      --muted: #6b6a66;
+      --accent: #1f6f8b;
+      --accent-2: #f4a261;
+      --card: #ffffff;
+      --border: #e0ddd6;
+      --ok: #2a9d8f;
+      --ng: #e76f51;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+      background: radial-gradient(circle at 20% 20%, #ffffff, var(--bg));
+      color: var(--ink);
+    }
+    header {
+      padding: 28px 20px 18px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(120deg, #fdf5e6 0%, #f7efe5 50%, #eef4f7 100%);
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    main {
+      padding: 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 18px;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      padding: 12px;
+      font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fffdf8;
+    }
+    label {
+      font-size: 14px;
+      color: var(--muted);
+    }
+    select, input[type="number"], button {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      background: #fff;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #e9ecef;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .question {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      background: #fff;
+    }
+    .question h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+    .options label {
+      display: block;
+      margin: 6px 0;
+      color: var(--ink);
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      margin-left: 6px;
+    }
+    .badge.ok { background: rgba(42,157,143,0.15); color: var(--ok); }
+    .badge.ng { background: rgba(231,111,81,0.15); color: var(--ng); }
+    .json-block {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      overflow: auto;
+    }
+    .muted { color: var(--muted); }
+    .hidden { display: none; }
+    .prewrap { white-space: pre-wrap; }
+
+    @media (max-width: 720px) {
+      header { padding: 20px 16px 14px; }
+      header h1 { font-size: 18px; }
+      main { padding: 14px; }
+      .panel { padding: 12px; }
+      .row { gap: 8px; }
+      .row label { width: 100%; }
+      select, input[type="number"], input[type="file"], button {
+        width: 100%;
+      }
+      #examCountWrap { width: 100%; }
+      .question { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>問題演習・模擬試験ツール</h1>
+    <p>任意の問題JSONを読み込み、練習モード / 模擬試験モードで解けます。</p>
+  </header>
+  <main>
+    <div class="panel">
+      <label for="jsonFile">問題JSONファイルを選択</label>
+      <div class="row" style="margin-top:8px;">
+        <input id="jsonFile" type="file" accept=".json,application/json" />
+        <span class="muted" id="parseStatus"></span>
+      </div>
+      <p class="muted" style="margin:8px 0 0;">任意のJSONファイルを選択すると自動で読み込みます。サーバー不要です。</p>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <label>モード</label>
+        <select id="modeSelect">
+          <option value="practice">練習モード</option>
+          <option value="exam">模擬試験モード</option>
+        </select>
+        <span id="examCountWrap" class="row" style="gap:6px;">
+          <label for="examCount">問題数</label>
+          <input id="examCount" type="number" min="1" value="100" />
+        </span>
+        <label for="rangeStart">開始</label>
+        <input id="rangeStart" type="number" min="1" value="1" />
+        <label for="rangeEnd">終了</label>
+        <input id="rangeEnd" type="number" min="1" value="1" />
+        <label for="randomOrder">
+          <input id="randomOrder" type="checkbox" />
+          出題順をランダム
+        </label>
+        <button id="startBtn" class="secondary">開始</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0;">模擬試験モードでは最期に正誤判定し、間違いのみ表示します。</p>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin:0 0 8px; font-size:16px;">出題</h2>
+      <div id="quizArea"></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin:0 0 8px; font-size:16px;">JSONブロック（1問ずつ）</h2>
+      <div id="jsonBlocks" class="grid"></div>
+    </div>
+  </main>
+
+  <script>
+    const jsonFile = document.getElementById('jsonFile');
+    const parseStatus = document.getElementById('parseStatus');
+    const jsonBlocks = document.getElementById('jsonBlocks');
+    const modeSelect = document.getElementById('modeSelect');
+    const examCount = document.getElementById('examCount');
+    const examCountWrap = document.getElementById('examCountWrap');
+    const rangeStart = document.getElementById('rangeStart');
+    const rangeEnd = document.getElementById('rangeEnd');
+    const randomOrder = document.getElementById('randomOrder');
+    const startBtn = document.getElementById('startBtn');
+    const quizArea = document.getElementById('quizArea');
+
+    let questions = [];
+
+    function applyLoadedQuestions(data, label) {
+      questions = Array.isArray(data) ? data : [];
+      renderJsonBlocks(questions);
+      const max = Math.max(questions.length, 1);
+      rangeStart.value = 1;
+      rangeEnd.value = max;
+      rangeEnd.max = max;
+      rangeStart.max = max;
+      parseStatus.textContent = `${label} 読み込み完了: ${questions.length}問`;
+    }
+
+    function handleLoadError(message) {
+      parseStatus.textContent = message;
+      questions = [];
+      renderJsonBlocks([]);
+      rangeStart.value = 1;
+      rangeEnd.value = 1;
+      rangeStart.max = 1;
+      rangeEnd.max = 1;
+    }
+
+    function renderJsonBlocks(list) {
+      jsonBlocks.innerHTML = '';
+      for (const q of list) {
+        const pre = document.createElement('pre');
+        pre.className = 'json-block';
+        pre.textContent = JSON.stringify(q, null, 2);
+        jsonBlocks.appendChild(pre);
+      }
+    }
+
+    function renderPractice(list) {
+      quizArea.innerHTML = '';
+      if (list.length === 0) {
+        quizArea.textContent = '問題がありません。';
+        return;
+      }
+      let idx = 0;
+
+      const container = document.createElement('div');
+      container.className = 'question';
+      quizArea.appendChild(container);
+
+      function showQuestion() {
+        const q = list[idx];
+        container.innerHTML = '';
+        const h3 = document.createElement('h3');
+        h3.textContent = `問題${q.number ?? idx + 1}`;
+        container.appendChild(h3);
+
+        const p = document.createElement('p');
+        p.className = 'prewrap';
+        p.textContent = q.question;
+        container.appendChild(p);
+
+        const opts = document.createElement('div');
+        opts.className = 'options';
+        for (const opt of q.options) {
+          const label = document.createElement('label');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.name = `q_${idx}`;
+          cb.value = opt.key;
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(` ${opt.key}. ${opt.text}`));
+          opts.appendChild(label);
+        }
+        container.appendChild(opts);
+
+        const btnRow = document.createElement('div');
+        btnRow.className = 'row';
+        btnRow.style.marginTop = '10px';
+        const submitBtn = document.createElement('button');
+        submitBtn.textContent = '回答する';
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = '次へ';
+        nextBtn.className = 'secondary';
+        nextBtn.disabled = true;
+        btnRow.appendChild(submitBtn);
+        btnRow.appendChild(nextBtn);
+        container.appendChild(btnRow);
+
+        const result = document.createElement('div');
+        result.style.marginTop = '10px';
+        container.appendChild(result);
+
+        submitBtn.onclick = () => {
+          const selected = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(el => el.value);
+          const correct = q.answer.sort().join(',') === selected.sort().join(',');
+          result.innerHTML = '';
+          const badge = document.createElement('span');
+          badge.className = `badge ${correct ? 'ok' : 'ng'}`;
+          badge.textContent = correct ? '正解' : '不正解';
+          result.appendChild(badge);
+          const ans = document.createElement('p');
+          ans.textContent = `解答: ${q.answer.join(', ') || q.answerText}`;
+          result.appendChild(ans);
+          const exp = document.createElement('p');
+          exp.className = 'prewrap';
+          exp.textContent = `解説:\n${q.explanation}`;
+          result.appendChild(exp);
+          submitBtn.disabled = true;
+          nextBtn.disabled = false;
+        };
+
+        nextBtn.onclick = () => {
+          idx += 1;
+          if (idx >= list.length) {
+            container.innerHTML = '<p>完了しました。</p>';
+            return;
+          }
+          showQuestion();
+        };
+      }
+
+      showQuestion();
+    }
+
+    function renderExam(list, count) {
+      quizArea.innerHTML = '';
+      if (list.length === 0) {
+        quizArea.textContent = '問題がありません。';
+        return;
+      }
+      const pool = list.slice();
+      const useCount = Math.min(count, pool.length);
+      const selected = [];
+      while (selected.length < useCount) {
+        const i = Math.floor(Math.random() * pool.length);
+        selected.push(pool.splice(i, 1)[0]);
+      }
+
+      const form = document.createElement('div');
+      form.className = 'grid';
+      quizArea.appendChild(form);
+
+      selected.forEach((q, idx) => {
+        const card = document.createElement('div');
+        card.className = 'question';
+        const h3 = document.createElement('h3');
+        h3.textContent = `問題${q.number ?? idx + 1}`;
+        card.appendChild(h3);
+        const p = document.createElement('p');
+        p.className = 'prewrap';
+        p.textContent = q.question;
+        card.appendChild(p);
+        const opts = document.createElement('div');
+        opts.className = 'options';
+        for (const opt of q.options) {
+          const label = document.createElement('label');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.name = `q_${idx}`;
+          cb.value = opt.key;
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(` ${opt.key}. ${opt.text}`));
+          opts.appendChild(label);
+        }
+        card.appendChild(opts);
+        form.appendChild(card);
+      });
+
+      const submitBtn = document.createElement('button');
+      submitBtn.textContent = '採点する';
+      submitBtn.style.marginTop = '12px';
+      quizArea.appendChild(submitBtn);
+
+      const result = document.createElement('div');
+      result.style.marginTop = '12px';
+      quizArea.appendChild(result);
+
+      submitBtn.onclick = () => {
+        const incorrect = [];
+        selected.forEach((q, idx) => {
+          const selectedKeys = Array.from(form.querySelectorAll(`input[name=q_${idx}]:checked`)).map(el => el.value);
+          const correct = q.answer.sort().join(',') === selectedKeys.sort().join(',');
+          if (!correct) {
+            incorrect.push({ q, selectedKeys });
+          }
+        });
+
+        result.innerHTML = '';
+        const correctCount = selected.length - incorrect.length;
+        const score = (correctCount / selected.length) * 100;
+        const summary = document.createElement('p');
+        summary.textContent = `正解数: ${correctCount} / ${selected.length}`;
+        result.appendChild(summary);
+        const scoreLine = document.createElement('p');
+        scoreLine.textContent = `得点: ${score.toFixed(1)} / 100`;
+        result.appendChild(scoreLine);
+
+        if (incorrect.length === 0) {
+          const allOk = document.createElement('p');
+          allOk.textContent = '全問正解です。';
+          result.appendChild(allOk);
+          return;
+        }
+
+        const list = document.createElement('div');
+        list.className = 'grid';
+        incorrect.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'question';
+          const h3 = document.createElement('h3');
+          h3.textContent = `問題${item.q.number ?? ''}`;
+          card.appendChild(h3);
+          const p = document.createElement('p');
+          p.textContent = item.q.question;
+          card.appendChild(p);
+          const ua = document.createElement('p');
+          ua.textContent = `あなたの回答: ${item.selectedKeys.join(', ') || '未回答'}`;
+          card.appendChild(ua);
+          const ans = document.createElement('p');
+          ans.textContent = `解答: ${item.q.answer.join(', ') || item.q.answerText}`;
+          card.appendChild(ans);
+          const exp = document.createElement('p');
+          exp.className = 'prewrap';
+          exp.textContent = `解説:\n${item.q.explanation}`;
+          card.appendChild(exp);
+          list.appendChild(card);
+        });
+        result.appendChild(list);
+      };
+    }
+
+    function loadSelectedFile() {
+      const file = jsonFile.files && jsonFile.files[0];
+      if (!file) {
+        handleLoadError('JSONファイルを選択してください。');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          applyLoadedQuestions(data, file.name);
+        } catch (e) {
+          handleLoadError('JSONの形式が正しくありません。');
+        }
+      };
+      reader.onerror = () => {
+        handleLoadError('ファイルの読み込みに失敗しました。');
+      };
+      reader.readAsText(file);
+    }
+
+    jsonFile.onchange = () => {
+      loadSelectedFile();
+    };
+
+    function getRangeFilteredQuestions() {
+      const total = questions.length;
+      if (total === 0) return [];
+      let start = parseInt(rangeStart.value, 10);
+      let end = parseInt(rangeEnd.value, 10);
+      if (Number.isNaN(start)) start = 1;
+      if (Number.isNaN(end)) end = total;
+      start = Math.max(1, Math.min(start, total));
+      end = Math.max(1, Math.min(end, total));
+      if (start > end) [start, end] = [end, start];
+      return questions.slice(start - 1, end);
+    }
+
+    function applyRandomOrder(list) {
+      if (!randomOrder.checked) return list;
+      const shuffled = list.slice();
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    }
+
+    startBtn.onclick = () => {
+      if (questions.length === 0) {
+        parseStatus.textContent = '先に解析してください。';
+        return;
+      }
+      const rangeList = getRangeFilteredQuestions();
+      const mode = modeSelect.value;
+      if (mode === 'practice') {
+        const useList = applyRandomOrder(rangeList);
+        renderPractice(useList);
+      } else {
+        const count = Math.max(1, parseInt(examCount.value, 10) || 1);
+        const limit = Math.min(count, rangeList.length);
+        let useList;
+        if (randomOrder.checked) {
+          // random sample without replacement, and keep random order
+          const pool = rangeList.slice();
+          useList = [];
+          while (useList.length < limit) {
+            const i = Math.floor(Math.random() * pool.length);
+            useList.push(pool.splice(i, 1)[0]);
+          }
+        } else {
+          useList = rangeList.slice(0, limit);
+        }
+        renderExam(useList, limit);
+      }
+    };
+
+    function updateModeUI() {
+      const isExam = modeSelect.value === 'exam';
+      examCountWrap.style.display = isExam ? 'flex' : 'none';
+    }
+
+    modeSelect.onchange = () => {
+      updateModeUI();
+    };
+
+    updateModeUI();
+  </script>
+</body>
+</html>
