@@ -182,6 +182,10 @@
           <input id="randomOrder" type="checkbox" />
           出題順をランダム
         </label>
+        <label for="randomOptions">
+          <input id="randomOptions" type="checkbox" />
+          選択肢をランダム
+        </label>
         <button id="startBtn" class="secondary">開始</button>
       </div>
       <p class="muted" style="margin:8px 0 0;">模擬試験モードでは最期に正誤判定し、間違いのみ表示します。</p>
@@ -215,10 +219,12 @@
     const rangeStart = document.getElementById('rangeStart');
     const rangeEnd = document.getElementById('rangeEnd');
     const randomOrder = document.getElementById('randomOrder');
+    const randomOptions = document.getElementById('randomOptions');
     const startBtn = document.getElementById('startBtn');
     const quizArea = document.getElementById('quizArea');
 
     let questions = [];
+    let optionOrderMap = new Map();
 
     function applyLoadedQuestions(data, label) {
       questions = Array.isArray(data) ? data : [];
@@ -252,6 +258,49 @@
       }
     }
 
+    const DISPLAY_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+    function getOptionOrderKey(q, idx) {
+      return q.number ?? `idx_${idx}`;
+    }
+
+    function getDisplayOptions(q, idx) {
+      const original = q.options || [];
+      if (!randomOptions.checked) {
+        return original.map((opt, i) => ({
+          displayKey: opt.key || DISPLAY_KEYS[i],
+          originalKey: opt.key,
+          text: opt.text
+        }));
+      }
+      const key = getOptionOrderKey(q, idx);
+      if (!optionOrderMap.has(key)) {
+        const shuffled = original.slice();
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        optionOrderMap.set(key, shuffled);
+      }
+      const shuffled = optionOrderMap.get(key);
+      return shuffled.map((opt, i) => ({
+        displayKey: DISPLAY_KEYS[i] ?? opt.key,
+        originalKey: opt.key,
+        text: opt.text
+      }));
+    }
+
+    function getDisplayAnswerKeys(q, displayOptions) {
+      const answers = new Set(q.answer || []);
+      const display = [];
+      for (const opt of displayOptions) {
+        if (answers.has(opt.originalKey)) {
+          display.push(opt.displayKey);
+        }
+      }
+      return display;
+    }
+
     function renderPractice(list) {
       quizArea.innerHTML = '';
       if (list.length === 0) {
@@ -268,7 +317,7 @@
         const q = list[idx];
         container.innerHTML = '';
         const h3 = document.createElement('h3');
-        h3.textContent = `問題${q.number ?? idx + 1}`;
+        h3.textContent = `問題${idx + 1}`;
         container.appendChild(h3);
 
         const p = document.createElement('p');
@@ -278,14 +327,15 @@
 
         const opts = document.createElement('div');
         opts.className = 'options';
-        for (const opt of q.options) {
+        const displayOptions = getDisplayOptions(q, idx);
+        for (const opt of displayOptions) {
           const label = document.createElement('label');
           const cb = document.createElement('input');
           cb.type = 'checkbox';
           cb.name = `q_${idx}`;
-          cb.value = opt.key;
+          cb.value = opt.displayKey;
           label.appendChild(cb);
-          label.appendChild(document.createTextNode(` ${opt.key}. ${opt.text}`));
+          label.appendChild(document.createTextNode(` ${opt.displayKey}. ${opt.text}`));
           opts.appendChild(label);
         }
         container.appendChild(opts);
@@ -309,14 +359,15 @@
 
         submitBtn.onclick = () => {
           const selected = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(el => el.value);
-          const correct = q.answer.sort().join(',') === selected.sort().join(',');
+          const correctKeys = getDisplayAnswerKeys(q, displayOptions);
+          const correct = correctKeys.sort().join(',') === selected.sort().join(',');
           result.innerHTML = '';
           const badge = document.createElement('span');
           badge.className = `badge ${correct ? 'ok' : 'ng'}`;
           badge.textContent = correct ? '正解' : '不正解';
           result.appendChild(badge);
           const ans = document.createElement('p');
-          ans.textContent = `解答: ${q.answer.join(', ') || q.answerText}`;
+          ans.textContent = `解答: ${correctKeys.join(', ') || q.answerText}`;
           result.appendChild(ans);
           const exp = document.createElement('p');
           exp.className = 'prewrap';
@@ -361,7 +412,7 @@
         const card = document.createElement('div');
         card.className = 'question';
         const h3 = document.createElement('h3');
-        h3.textContent = `問題${q.number ?? idx + 1}`;
+        h3.textContent = `問題${idx + 1}`;
         card.appendChild(h3);
         const p = document.createElement('p');
         p.className = 'prewrap';
@@ -369,14 +420,15 @@
         card.appendChild(p);
         const opts = document.createElement('div');
         opts.className = 'options';
-        for (const opt of q.options) {
+        const displayOptions = getDisplayOptions(q, idx);
+        for (const opt of displayOptions) {
           const label = document.createElement('label');
           const cb = document.createElement('input');
           cb.type = 'checkbox';
           cb.name = `q_${idx}`;
-          cb.value = opt.key;
+          cb.value = opt.displayKey;
           label.appendChild(cb);
-          label.appendChild(document.createTextNode(` ${opt.key}. ${opt.text}`));
+          label.appendChild(document.createTextNode(` ${opt.displayKey}. ${opt.text}`));
           opts.appendChild(label);
         }
         card.appendChild(opts);
@@ -396,9 +448,11 @@
         const incorrect = [];
         selected.forEach((q, idx) => {
           const selectedKeys = Array.from(form.querySelectorAll(`input[name=q_${idx}]:checked`)).map(el => el.value);
-          const correct = q.answer.sort().join(',') === selectedKeys.sort().join(',');
+          const displayOptions = getDisplayOptions(q, idx);
+          const correctKeys = getDisplayAnswerKeys(q, displayOptions);
+          const correct = correctKeys.sort().join(',') === selectedKeys.sort().join(',');
           if (!correct) {
-            incorrect.push({ q, selectedKeys });
+            incorrect.push({ q, selectedKeys, correctKeys });
           }
         });
 
@@ -434,7 +488,7 @@
           ua.textContent = `あなたの回答: ${item.selectedKeys.join(', ') || '未回答'}`;
           card.appendChild(ua);
           const ans = document.createElement('p');
-          ans.textContent = `解答: ${item.q.answer.join(', ') || item.q.answerText}`;
+          ans.textContent = `解答: ${item.correctKeys.join(', ') || item.q.answerText}`;
           card.appendChild(ans);
           const exp = document.createElement('p');
           exp.className = 'prewrap';
@@ -458,6 +512,7 @@
           const text = String(reader.result || '').replace(/^\uFEFF/, '').trim();
           const data = JSON.parse(text);
           applyLoadedQuestions(data, file.name);
+          optionOrderMap = new Map();
         } catch (e) {
           handleLoadError(`JSONの形式が正しくありません: ${e.message}`);
         }
@@ -470,6 +525,10 @@
 
     jsonFile.onchange = () => {
       loadSelectedFile();
+    };
+
+    randomOptions.onchange = () => {
+      optionOrderMap = new Map();
     };
 
     showJson.onchange = () => {
