@@ -178,15 +178,19 @@
         <input id="rangeStart" type="number" min="1" value="1" />
         <label for="rangeEnd">終了</label>
         <input id="rangeEnd" type="number" min="1" value="1" />
-        <label for="randomOrder">
-          <input id="randomOrder" type="checkbox" />
-          出題順をランダム
-        </label>
-        <label for="randomOptions">
-          <input id="randomOptions" type="checkbox" />
-          選択肢をランダム
-        </label>
-        <button id="startBtn" class="secondary">開始</button>
+        <div class="row" style="width:100%; margin-top:6px;">
+          <label for="randomOrder">
+            <input id="randomOrder" type="checkbox" />
+            出題順をランダム
+          </label>
+          <label for="randomOptions">
+            <input id="randomOptions" type="checkbox" />
+            選択肢をランダム
+          </label>
+        </div>
+        <div class="row" style="width:100%; margin-top:6px;">
+          <button id="startBtn" class="secondary">開始</button>
+        </div>
       </div>
       <p class="muted" style="margin:8px 0 0;">模擬試験モードでは最期に正誤判定し、間違いのみ表示します。</p>
     </div>
