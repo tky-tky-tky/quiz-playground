@@ -112,6 +112,11 @@
       margin: 6px 0;
       color: var(--ink);
     }
+    .key-tag {
+      margin-left: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
     .badge {
       display: inline-block;
       padding: 2px 8px;
@@ -160,7 +165,7 @@
         <input id="jsonFile" type="file" accept=".json,application/json" />
         <span class="muted" id="parseStatus"></span>
       </div>
-      <p class="muted" style="margin:8px 0 0;">任意のJSONファイルを選択すると自動で読み込みます。サーバー不要です。</p>
+      <p class="muted" style="margin:8px 0 0;">任意のJSONファイルを選択すると自動で読み込みます。</p>
     </div>
 
     <div class="panel">
@@ -179,10 +184,21 @@
         <label for="rangeEnd">終了</label>
         <input id="rangeEnd" type="number" min="1" value="1" />
         <div class="row" style="width:100%; margin-top:6px;">
+          <label for="specificMode">
+            <input id="specificMode" type="checkbox" />
+            特定問題だけを出題
+          </label>
+        </div>
+        <div class="row" id="specificInputWrap" style="width:100%; margin-top:6px; display:none;">
+          <input id="specificInput" type="text" placeholder="例: 101,102,205" />
+        </div>
+        <div class="row" style="width:100%; margin-top:6px;">
           <label for="randomOrder">
             <input id="randomOrder" type="checkbox" />
             出題順をランダム
           </label>
+        </div>
+        <div class="row" style="width:100%; margin-top:6px;">
           <label for="randomOptions">
             <input id="randomOptions" type="checkbox" />
             選択肢をランダム
@@ -196,8 +212,14 @@
     </div>
 
     <div class="panel">
-      <h2 style="margin:0 0 8px; font-size:16px;">出題</h2>
-      <div id="quizArea"></div>
+      <div class="row" style="justify-content: space-between;">
+        <h2 style="margin:0; font-size:16px;">出題</h2>
+        <label for="showKey">
+          <input id="showKey" type="checkbox" />
+          keyを表示
+        </label>
+      </div>
+      <div id="quizArea" style="margin-top:8px;"></div>
     </div>
 
     <div class="panel">
@@ -224,8 +246,12 @@
     const rangeEnd = document.getElementById('rangeEnd');
     const randomOrder = document.getElementById('randomOrder');
     const randomOptions = document.getElementById('randomOptions');
+    const specificMode = document.getElementById('specificMode');
+    const specificInput = document.getElementById('specificInput');
+    const specificInputWrap = document.getElementById('specificInputWrap');
     const startBtn = document.getElementById('startBtn');
     const quizArea = document.getElementById('quizArea');
+    const showKey = document.getElementById('showKey');
 
     let questions = [];
     let optionOrderMap = new Map();
@@ -305,6 +331,57 @@
       return display;
     }
 
+    function getQuestionNumber(q, fallback) {
+      return Number.isFinite(q.number) ? q.number : fallback;
+    }
+
+    function setQuestionTitle(h3, displayIndex, qNumber) {
+      h3.className = 'question-title';
+      h3.dataset.displayIndex = displayIndex;
+      h3.dataset.qNumber = qNumber ?? '';
+      h3.textContent = `問題${displayIndex}`;
+      if (showKey.checked && qNumber !== undefined && qNumber !== null && qNumber !== '') {
+        const span = document.createElement('span');
+        span.className = 'key-tag';
+        span.textContent = `(${qNumber})`;
+        h3.appendChild(span);
+      }
+    }
+
+    function refreshQuestionTitles() {
+      document.querySelectorAll('.question-title').forEach((el) => {
+        const displayIndex = el.dataset.displayIndex || '';
+        const qNumber = el.dataset.qNumber || '';
+        el.textContent = `問題${displayIndex}`;
+        if (showKey.checked && qNumber !== '') {
+          const span = document.createElement('span');
+          span.className = 'key-tag';
+          span.textContent = `(${qNumber})`;
+          el.appendChild(span);
+        }
+      });
+    }
+
+    function renderWrongListUI(container, incorrectNumbers) {
+      if (!incorrectNumbers || incorrectNumbers.length === 0) return;
+      const wrap = document.createElement('div');
+      wrap.style.marginTop = '10px';
+      const btn = document.createElement('button');
+      btn.textContent = '間違えた問題を出力';
+      btn.className = 'secondary';
+      const box = document.createElement('textarea');
+      box.className = 'hidden';
+      box.readOnly = true;
+      box.style.marginTop = '8px';
+      box.value = incorrectNumbers.join(',');
+      btn.onclick = () => {
+        box.classList.remove('hidden');
+      };
+      wrap.appendChild(btn);
+      wrap.appendChild(box);
+      container.appendChild(wrap);
+    }
+
     function renderPractice(list) {
       quizArea.innerHTML = '';
       if (list.length === 0) {
@@ -312,6 +389,8 @@
         return;
       }
       let idx = 0;
+      const incorrectSet = new Set();
+      const answerState = new Map();
 
       const container = document.createElement('div');
       container.className = 'question';
@@ -321,7 +400,7 @@
         const q = list[idx];
         container.innerHTML = '';
         const h3 = document.createElement('h3');
-        h3.textContent = `問題${idx + 1}`;
+        setQuestionTitle(h3, idx + 1, getQuestionNumber(q, idx + 1));
         container.appendChild(h3);
 
         const p = document.createElement('p');
@@ -349,10 +428,15 @@
         btnRow.style.marginTop = '10px';
         const submitBtn = document.createElement('button');
         submitBtn.textContent = '回答する';
+        const prevBtn = document.createElement('button');
+        prevBtn.textContent = '前へ';
+        prevBtn.className = 'secondary';
+        prevBtn.disabled = idx === 0;
         const nextBtn = document.createElement('button');
         nextBtn.textContent = '次へ';
         nextBtn.className = 'secondary';
         nextBtn.disabled = true;
+        btnRow.appendChild(prevBtn);
         btnRow.appendChild(submitBtn);
         btnRow.appendChild(nextBtn);
         container.appendChild(btnRow);
@@ -361,10 +445,39 @@
         result.style.marginTop = '10px';
         container.appendChild(result);
 
+        const state = answerState.get(idx);
+        if (state) {
+          for (const cb of container.querySelectorAll('input[type=checkbox]')) {
+            cb.checked = state.selectedKeys.includes(cb.value);
+            cb.disabled = true;
+          }
+          result.innerHTML = '';
+          const badge = document.createElement('span');
+          badge.className = `badge ${state.correct ? 'ok' : 'ng'}`;
+          badge.textContent = state.correct ? '正解' : '不正解';
+          result.appendChild(badge);
+          const ans = document.createElement('p');
+          ans.textContent = `解答: ${state.correctKeys.join(', ') || q.answerText}`;
+          result.appendChild(ans);
+          const exp = document.createElement('p');
+          exp.className = 'prewrap';
+          exp.textContent = `解説:\n${q.explanation}`;
+          result.appendChild(exp);
+          submitBtn.disabled = true;
+          nextBtn.disabled = false;
+        }
+
         submitBtn.onclick = () => {
           const selected = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(el => el.value);
           const correctKeys = getDisplayAnswerKeys(q, displayOptions);
           const correct = correctKeys.sort().join(',') === selected.sort().join(',');
+          if (!correct) {
+            incorrectSet.add(getQuestionNumber(q, idx + 1));
+          }
+          answerState.set(idx, { selectedKeys: selected, correctKeys, correct });
+          for (const cb of container.querySelectorAll('input[type=checkbox]')) {
+            cb.disabled = true;
+          }
           result.innerHTML = '';
           const badge = document.createElement('span');
           badge.className = `badge ${correct ? 'ok' : 'ng'}`;
@@ -381,10 +494,20 @@
           nextBtn.disabled = false;
         };
 
+        prevBtn.onclick = () => {
+          if (idx === 0) return;
+          idx -= 1;
+          showQuestion();
+        };
+
         nextBtn.onclick = () => {
           idx += 1;
           if (idx >= list.length) {
             container.innerHTML = '<p>完了しました。</p>';
+            const wrongNumbers = Array.from(incorrectSet);
+            if (wrongNumbers.length > 0) {
+              renderWrongListUI(container, wrongNumbers);
+            }
             return;
           }
           showQuestion();
@@ -400,13 +523,7 @@
         quizArea.textContent = '問題がありません。';
         return;
       }
-      const pool = list.slice();
-      const useCount = Math.min(count, pool.length);
-      const selected = [];
-      while (selected.length < useCount) {
-        const i = Math.floor(Math.random() * pool.length);
-        selected.push(pool.splice(i, 1)[0]);
-      }
+      const selected = list.slice(0, count);
 
       const form = document.createElement('div');
       form.className = 'grid';
@@ -416,7 +533,7 @@
         const card = document.createElement('div');
         card.className = 'question';
         const h3 = document.createElement('h3');
-        h3.textContent = `問題${idx + 1}`;
+        setQuestionTitle(h3, idx + 1, getQuestionNumber(q, idx + 1));
         card.appendChild(h3);
         const p = document.createElement('p');
         p.className = 'prewrap';
@@ -456,7 +573,7 @@
           const correctKeys = getDisplayAnswerKeys(q, displayOptions);
           const correct = correctKeys.sort().join(',') === selectedKeys.sort().join(',');
           if (!correct) {
-            incorrect.push({ q, selectedKeys, correctKeys });
+            incorrect.push({ q, selectedKeys, correctKeys, displayIndex: idx + 1 });
           }
         });
 
@@ -477,13 +594,16 @@
           return;
         }
 
+        const wrongNumbers = incorrect.map(item => getQuestionNumber(item.q, item.displayIndex));
+        renderWrongListUI(result, wrongNumbers);
+
         const list = document.createElement('div');
         list.className = 'grid';
         incorrect.forEach((item) => {
           const card = document.createElement('div');
           card.className = 'question';
           const h3 = document.createElement('h3');
-          h3.textContent = `問題${item.q.number ?? ''}`;
+          setQuestionTitle(h3, item.displayIndex, getQuestionNumber(item.q, item.displayIndex));
           card.appendChild(h3);
           const p = document.createElement('p');
           p.textContent = item.q.question;
@@ -535,6 +655,10 @@
       optionOrderMap = new Map();
     };
 
+    showKey.onchange = () => {
+      refreshQuestionTitles();
+    };
+
     showJson.onchange = () => {
       if (showJson.checked) {
         jsonBlocks.classList.remove('hidden');
@@ -545,9 +669,53 @@
       }
     };
 
+    function updateSpecificUI() {
+      const enabled = specificMode.checked;
+      specificInputWrap.style.display = enabled ? 'flex' : 'none';
+      rangeStart.disabled = enabled;
+      rangeEnd.disabled = enabled;
+    }
+
+    specificMode.onchange = () => {
+      updateSpecificUI();
+    };
+
+    function parseSpecificNumbers() {
+      const raw = (specificInput.value || '').trim();
+      if (!raw) return [];
+      const nums = raw
+        .split(',')
+        .map(v => parseInt(v.trim(), 10))
+        .filter(v => Number.isFinite(v));
+      const unique = [];
+      const seen = new Set();
+      for (const n of nums) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          unique.push(n);
+        }
+      }
+      return unique;
+    }
+
+    function getSpecifiedQuestions(numbers) {
+      if (numbers.length === 0) return [];
+      const map = new Map();
+      questions.forEach((q) => {
+        if (Number.isFinite(q.number) && !map.has(q.number)) {
+          map.set(q.number, q);
+        }
+      });
+      return numbers.map(n => map.get(n)).filter(Boolean);
+    }
+
     function getRangeFilteredQuestions() {
       const total = questions.length;
       if (total === 0) return [];
+      if (specificMode.checked) {
+        const numbers = parseSpecificNumbers();
+        return getSpecifiedQuestions(numbers);
+      }
       let start = parseInt(rangeStart.value, 10);
       let end = parseInt(rangeEnd.value, 10);
       if (Number.isNaN(start)) start = 1;
@@ -574,6 +742,10 @@
         return;
       }
       const rangeList = getRangeFilteredQuestions();
+      if (specificMode.checked && rangeList.length === 0) {
+        parseStatus.textContent = '指定した問題番号が見つかりません。';
+        return;
+      }
       const mode = modeSelect.value;
       if (mode === 'practice') {
         const useList = applyRandomOrder(rangeList);
@@ -607,6 +779,7 @@
     };
 
     updateModeUI();
+    updateSpecificUI();
   </script>
 </body>
 </html>
