@@ -163,10 +163,10 @@
     <div class="panel">
       <label for="jsonFile">問題JSONファイルを選択</label>
       <div class="row" style="margin-top:8px;">
-        <input id="jsonFile" type="file" accept=".json,application/json" />
+        <input id="jsonFile" type="file" accept=".json,application/json" multiple />
         <span class="muted" id="parseStatus"></span>
       </div>
-      <p class="muted" style="margin:8px 0 0;">任意のJSONファイルを選択すると自動で読み込みます。</p>
+      <p class="muted" style="margin:8px 0 0;">JSONは複数選択できます。選択すると自動で読み込みます。</p>
     </div>
 
     <div class="panel">
@@ -191,7 +191,7 @@
           </label>
         </div>
         <div class="row" id="specificInputWrap" style="width:100%; margin-top:6px; display:none;">
-          <input id="specificInput" type="text" placeholder="例: 101,102,205" />
+          <input id="specificInput" type="text" placeholder="例: 101,102 または SnowProCore(JPNtest).json#34" />
         </div>
         <div class="row" style="width:100%; margin-top:6px;">
           <label for="randomOrder">
@@ -257,15 +257,53 @@
     let questions = [];
     let optionOrderMap = new Map();
 
-    function applyLoadedQuestions(data, label) {
-      questions = Array.isArray(data) ? data : [];
+    function setShuffleControlsLocked(locked) {
+      randomOrder.disabled = locked;
+      randomOptions.disabled = locked;
+    }
+
+    function buildUniqueFileLabels(files) {
+      const counts = new Map();
+      return files.map((file) => {
+        const base = String(file.name || 'unknown.json');
+        const next = (counts.get(base) || 0) + 1;
+        counts.set(base, next);
+        return next === 1 ? base : `${base}(${next})`;
+      });
+    }
+
+    function normalizeLoadedQuestion(raw, sourceFile, localIndex) {
+      const q = (raw && typeof raw === 'object') ? raw : {};
+      const localNumber = Number.isFinite(q.number) ? q.number : (localIndex + 1);
+      return {
+        ...q,
+        sourceFile,
+        originNumber: localNumber,
+      };
+    }
+
+    function applyLoadedQuestionSets(fileEntries) {
+      const merged = [];
+      fileEntries.forEach((entry) => {
+        const list = Array.isArray(entry.data) ? entry.data : [];
+        list.forEach((raw, idx) => {
+          merged.push(normalizeLoadedQuestion(raw, entry.label, idx));
+        });
+      });
+      questions = merged.map((q, idx) => ({
+        ...q,
+        number: idx + 1,
+      }));
       renderJsonBlocks(questions);
       const max = Math.max(questions.length, 1);
       rangeStart.value = 1;
       rangeEnd.value = max;
       rangeEnd.max = max;
       rangeStart.max = max;
-      parseStatus.textContent = `${label} 読み込み完了: ${questions.length}問`;
+      const labels = fileEntries.map((entry) => entry.label);
+      const preview = labels.slice(0, 3).join(', ');
+      const suffix = labels.length > 3 ? ` ほか${labels.length - 3}件` : '';
+      parseStatus.textContent = `${labels.length}ファイル 読み込み完了: ${questions.length}問 (${preview}${suffix})`;
     }
 
     function handleLoadError(message) {
@@ -276,6 +314,7 @@
       rangeEnd.value = 1;
       rangeStart.max = 1;
       rangeEnd.max = 1;
+      setShuffleControlsLocked(false);
     }
 
     function renderJsonBlocks(list) {
@@ -295,12 +334,28 @@
       return q.number ?? `idx_${idx}`;
     }
 
+    function normalizeOptionKey(option, idx) {
+      const raw = (typeof option === 'string')
+        ? option
+        : (option && typeof option === 'object' ? option.key : '');
+      const key = String(raw ?? '').trim().toUpperCase();
+      return key || DISPLAY_KEYS[idx] || String(idx + 1);
+    }
+
+    function getNormalizedOptions(q) {
+      const original = Array.isArray(q.options) ? q.options : [];
+      return original.map((opt, i) => ({
+        key: normalizeOptionKey(opt, i),
+        text: (opt && typeof opt === 'object' && opt.text != null) ? String(opt.text) : ''
+      }));
+    }
+
     function getDisplayOptions(q, idx) {
-      const original = q.options || [];
+      const original = getNormalizedOptions(q);
       if (!randomOptions.checked) {
         return original.map((opt, i) => ({
           displayKey: opt.key || DISPLAY_KEYS[i],
-          originalKey: opt.key,
+          originalKey: opt.key || DISPLAY_KEYS[i],
           text: opt.text
         }));
       }
@@ -321,8 +376,19 @@
       }));
     }
 
+    function buildOptionLabel(opt) {
+      if (opt.text && opt.text.trim().length > 0) {
+        return ` ${opt.displayKey}. ${opt.text}`;
+      }
+      return ` ${opt.displayKey}`;
+    }
+
     function getDisplayAnswerKeys(q, displayOptions) {
-      const answers = new Set(q.answer || []);
+      const answers = new Set(
+        (Array.isArray(q.answer) ? q.answer : [])
+          .map((value) => String(value ?? '').trim().toUpperCase())
+          .filter(Boolean)
+      );
       const display = [];
       for (const opt of displayOptions) {
         if (answers.has(opt.originalKey)) {
@@ -336,15 +402,45 @@
       return Number.isFinite(q.number) ? q.number : fallback;
     }
 
-    function setQuestionTitle(h3, displayIndex, qNumber) {
+    function getQuestionRef(q, fallbackNumber) {
+      const localNumber = Number.isFinite(q.originNumber)
+        ? q.originNumber
+        : getQuestionNumber(q, fallbackNumber);
+      const sourceFile = String(q.sourceFile || '').trim();
+      if (sourceFile && Number.isFinite(localNumber)) {
+        return `${sourceFile}#${localNumber}`;
+      }
+      if (Number.isFinite(localNumber)) {
+        return String(localNumber);
+      }
+      return '';
+    }
+
+    function normalizeRefToken(token) {
+      const raw = String(token || '').trim();
+      if (!raw) return '';
+      const hash = raw.match(/^(.+?)[#＃]\s*(\d+)$/);
+      if (hash) {
+        return `${hash[1].trim()}#${parseInt(hash[2], 10)}`;
+      }
+      const colon = raw.match(/^(.+?)[:：]\s*(\d+)$/);
+      if (colon) {
+        return `${colon[1].trim()}#${parseInt(colon[2], 10)}`;
+      }
+      return raw;
+    }
+
+    function setQuestionTitle(h3, displayIndex, qNumber, qRef) {
       h3.className = 'question-title';
       h3.dataset.displayIndex = displayIndex;
       h3.dataset.qNumber = qNumber ?? '';
+      h3.dataset.qRef = qRef ?? '';
       h3.textContent = `問題${displayIndex}`;
-      if (showKey.checked && qNumber !== undefined && qNumber !== null && qNumber !== '') {
+      const keyLabel = qRef || qNumber;
+      if (showKey.checked && keyLabel !== undefined && keyLabel !== null && keyLabel !== '') {
         const span = document.createElement('span');
         span.className = 'key-tag';
-        span.textContent = `(${qNumber})`;
+        span.textContent = `(${keyLabel})`;
         h3.appendChild(span);
       }
     }
@@ -353,28 +449,30 @@
       document.querySelectorAll('.question-title').forEach((el) => {
         const displayIndex = el.dataset.displayIndex || '';
         const qNumber = el.dataset.qNumber || '';
+        const qRef = el.dataset.qRef || '';
         el.textContent = `問題${displayIndex}`;
-        if (showKey.checked && qNumber !== '') {
+        const keyLabel = qRef || qNumber;
+        if (showKey.checked && keyLabel !== '') {
           const span = document.createElement('span');
           span.className = 'key-tag';
-          span.textContent = `(${qNumber})`;
+          span.textContent = `(${keyLabel})`;
           el.appendChild(span);
         }
       });
     }
 
-    function renderWrongListUI(container, incorrectNumbers) {
-      if (!incorrectNumbers || incorrectNumbers.length === 0) return;
+    function renderWrongListUI(container, incorrectRefs) {
+      if (!incorrectRefs || incorrectRefs.length === 0) return;
       const wrap = document.createElement('div');
       wrap.style.marginTop = '10px';
       const btn = document.createElement('button');
-      btn.textContent = '間違えた問題を出力';
+      btn.textContent = '間違えた問題IDを出力';
       btn.className = 'secondary';
       const box = document.createElement('textarea');
       box.className = 'hidden';
       box.readOnly = true;
       box.style.marginTop = '8px';
-      box.value = incorrectNumbers.join(',');
+      box.value = incorrectRefs.join(', ');
       btn.onclick = () => {
         box.classList.remove('hidden');
       };
@@ -401,7 +499,9 @@
         const q = list[idx];
         container.innerHTML = '';
         const h3 = document.createElement('h3');
-        setQuestionTitle(h3, idx + 1, getQuestionNumber(q, idx + 1));
+        const qNumber = getQuestionNumber(q, idx + 1);
+        const qRef = getQuestionRef(q, qNumber);
+        setQuestionTitle(h3, idx + 1, qNumber, qRef);
         container.appendChild(h3);
 
         const p = document.createElement('p');
@@ -419,7 +519,7 @@
           cb.name = `q_${idx}`;
           cb.value = opt.displayKey;
           label.appendChild(cb);
-          label.appendChild(document.createTextNode(` ${opt.displayKey}. ${opt.text}`));
+          label.appendChild(document.createTextNode(buildOptionLabel(opt)));
           opts.appendChild(label);
         }
         container.appendChild(opts);
@@ -458,7 +558,7 @@
           badge.textContent = state.correct ? '正解' : '不正解';
           result.appendChild(badge);
           const ans = document.createElement('p');
-          ans.textContent = `解答: ${state.correctKeys.join(', ') || q.answerText}`;
+          ans.textContent = `解答: ${state.correctKeys.join(', ') || '未設定'}`;
           result.appendChild(ans);
           const exp = document.createElement('p');
           exp.className = 'prewrap';
@@ -473,7 +573,7 @@
           const correctKeys = getDisplayAnswerKeys(q, displayOptions);
           const correct = correctKeys.sort().join(',') === selected.sort().join(',');
           if (!correct) {
-            incorrectSet.add(getQuestionNumber(q, idx + 1));
+            incorrectSet.add(getQuestionRef(q, getQuestionNumber(q, idx + 1)));
           }
           answerState.set(idx, { selectedKeys: selected, correctKeys, correct });
           for (const cb of container.querySelectorAll('input[type=checkbox]')) {
@@ -485,7 +585,7 @@
           badge.textContent = correct ? '正解' : '不正解';
           result.appendChild(badge);
           const ans = document.createElement('p');
-          ans.textContent = `解答: ${correctKeys.join(', ') || q.answerText}`;
+          ans.textContent = `解答: ${correctKeys.join(', ') || '未設定'}`;
           result.appendChild(ans);
           const exp = document.createElement('p');
           exp.className = 'prewrap';
@@ -505,9 +605,9 @@
           idx += 1;
           if (idx >= list.length) {
             container.innerHTML = '<p>完了しました。</p>';
-            const wrongNumbers = Array.from(incorrectSet);
-            if (wrongNumbers.length > 0) {
-              renderWrongListUI(container, wrongNumbers);
+            const wrongRefs = Array.from(incorrectSet);
+            if (wrongRefs.length > 0) {
+              renderWrongListUI(container, wrongRefs);
             }
             return;
           }
@@ -534,7 +634,9 @@
         const card = document.createElement('div');
         card.className = 'question';
         const h3 = document.createElement('h3');
-        setQuestionTitle(h3, idx + 1, getQuestionNumber(q, idx + 1));
+        const qNumber = getQuestionNumber(q, idx + 1);
+        const qRef = getQuestionRef(q, qNumber);
+        setQuestionTitle(h3, idx + 1, qNumber, qRef);
         card.appendChild(h3);
         const p = document.createElement('p');
         p.className = 'prewrap';
@@ -550,7 +652,7 @@
           cb.name = `q_${idx}`;
           cb.value = opt.displayKey;
           label.appendChild(cb);
-          label.appendChild(document.createTextNode(` ${opt.displayKey}. ${opt.text}`));
+          label.appendChild(document.createTextNode(buildOptionLabel(opt)));
           opts.appendChild(label);
         }
         card.appendChild(opts);
@@ -595,8 +697,8 @@
           return;
         }
 
-        const wrongNumbers = incorrect.map(item => getQuestionNumber(item.q, item.displayIndex));
-        renderWrongListUI(result, wrongNumbers);
+        const wrongRefs = incorrect.map(item => getQuestionRef(item.q, getQuestionNumber(item.q, item.displayIndex)));
+        renderWrongListUI(result, wrongRefs);
 
         const list = document.createElement('div');
         list.className = 'grid';
@@ -604,7 +706,9 @@
           const card = document.createElement('div');
           card.className = 'question';
           const h3 = document.createElement('h3');
-          setQuestionTitle(h3, item.displayIndex, getQuestionNumber(item.q, item.displayIndex));
+          const qNumber = getQuestionNumber(item.q, item.displayIndex);
+          const qRef = getQuestionRef(item.q, qNumber);
+          setQuestionTitle(h3, item.displayIndex, qNumber, qRef);
           card.appendChild(h3);
           const p = document.createElement('p');
           p.textContent = item.q.question;
@@ -613,7 +717,7 @@
           ua.textContent = `あなたの回答: ${item.selectedKeys.join(', ') || '未回答'}`;
           card.appendChild(ua);
           const ans = document.createElement('p');
-          ans.textContent = `解答: ${item.correctKeys.join(', ') || item.q.answerText}`;
+          ans.textContent = `解答: ${item.correctKeys.join(', ') || '未設定'}`;
           card.appendChild(ans);
           const exp = document.createElement('p');
           exp.className = 'prewrap';
@@ -625,31 +729,42 @@
       };
     }
 
-    function loadSelectedFile() {
-      const file = jsonFile.files && jsonFile.files[0];
-      if (!file) {
+    function readFileText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error(`ファイルの読み込みに失敗しました: ${file.name}`));
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+
+    async function loadSelectedFiles() {
+      const files = Array.from(jsonFile.files || []);
+      if (files.length === 0) {
         handleLoadError('JSONファイルを選択してください。');
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
+      const labels = buildUniqueFileLabels(files);
+      const fileEntries = [];
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const label = labels[i];
         try {
-          const text = String(reader.result || '').replace(/^\uFEFF/, '').trim();
+          const text = (await readFileText(file)).replace(/^\uFEFF/, '').trim();
           const data = JSON.parse(text);
-          applyLoadedQuestions(data, file.name);
-          optionOrderMap = new Map();
+          fileEntries.push({ label, data });
         } catch (e) {
-          handleLoadError(`JSONの形式が正しくありません: ${e.message}`);
+          handleLoadError(`JSON読み込み失敗 (${file.name}): ${e.message}`);
+          return;
         }
-      };
-      reader.onerror = () => {
-        handleLoadError('ファイルの読み込みに失敗しました。');
-      };
-      reader.readAsText(file, 'utf-8');
+      }
+      applyLoadedQuestionSets(fileEntries);
+      optionOrderMap = new Map();
+      setShuffleControlsLocked(false);
     }
 
     jsonFile.onchange = () => {
-      loadSelectedFile();
+      loadSelectedFiles();
     };
 
     randomOptions.onchange = () => {
@@ -681,41 +796,71 @@
       updateSpecificUI();
     };
 
-    function parseSpecificNumbers() {
+    function parseSpecificSelectors() {
       const raw = (specificInput.value || '').trim();
       if (!raw) return [];
-      const nums = raw
-        .split(',')
-        .map(v => parseInt(v.trim(), 10))
-        .filter(v => Number.isFinite(v));
+      const tokens = raw
+        .split(/[\n,]+/)
+        .map(v => v.trim())
+        .filter(Boolean);
       const unique = [];
       const seen = new Set();
-      for (const n of nums) {
-        if (!seen.has(n)) {
-          seen.add(n);
-          unique.push(n);
+      for (const token of tokens) {
+        if (/^\d+$/.test(token)) {
+          const n = parseInt(token, 10);
+          const key = `n:${n}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            unique.push({ type: 'number', value: n });
+          }
+          continue;
+        }
+        const ref = normalizeRefToken(token).toLowerCase();
+        if (!ref) continue;
+        const key = `r:${ref}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push({ type: 'ref', value: ref });
         }
       }
       return unique;
     }
 
-    function getSpecifiedQuestions(numbers) {
-      if (numbers.length === 0) return [];
-      const map = new Map();
-      questions.forEach((q) => {
-        if (Number.isFinite(q.number) && !map.has(q.number)) {
-          map.set(q.number, q);
+    function getSpecifiedQuestions(selectors) {
+      if (selectors.length === 0) return [];
+      const numberMap = new Map();
+      const refMap = new Map();
+      questions.forEach((q, idx) => {
+        const n = getQuestionNumber(q, idx + 1);
+        if (Number.isFinite(n) && !numberMap.has(n)) {
+          numberMap.set(n, q);
+        }
+        const ref = normalizeRefToken(getQuestionRef(q, n)).toLowerCase();
+        if (ref && !refMap.has(ref)) {
+          refMap.set(ref, q);
         }
       });
-      return numbers.map(n => map.get(n)).filter(Boolean);
+      const picked = [];
+      selectors.forEach((selector) => {
+        if (selector.type === 'number') {
+          const q = numberMap.get(selector.value);
+          if (q) picked.push(q);
+          return;
+        }
+        if (selector.type === 'ref') {
+          const q = refMap.get(selector.value);
+          if (q) picked.push(q);
+        }
+      });
+      return picked;
     }
 
     function getRangeFilteredQuestions() {
       const total = questions.length;
       if (total === 0) return [];
       if (specificMode.checked) {
-        const numbers = parseSpecificNumbers();
-        return getSpecifiedQuestions(numbers);
+        const selectors = parseSpecificSelectors();
+        return getSpecifiedQuestions(selectors);
       }
       let start = parseInt(rangeStart.value, 10);
       let end = parseInt(rangeEnd.value, 10);
@@ -744,9 +889,10 @@
       }
       const rangeList = getRangeFilteredQuestions();
       if (specificMode.checked && rangeList.length === 0) {
-        parseStatus.textContent = '指定した問題番号が見つかりません。';
+        parseStatus.textContent = '指定した問題番号/問題IDが見つかりません。';
         return;
       }
+      setShuffleControlsLocked(true);
       const mode = modeSelect.value;
       if (mode === 'practice') {
         const useList = applyRandomOrder(rangeList);
@@ -781,6 +927,7 @@
 
     updateModeUI();
     updateSpecificUI();
+    setShuffleControlsLocked(false);
   </script>
 </body>
 </html>
