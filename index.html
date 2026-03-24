@@ -255,11 +255,21 @@
     const showKey = document.getElementById('showKey');
 
     let questions = [];
-    let optionOrderMap = new Map();
+    let activeSession = null;
+    let sessionSeq = 0;
 
-    function setShuffleControlsLocked(locked) {
-      randomOrder.disabled = locked;
-      randomOptions.disabled = locked;
+    function setShuffleControlsLocked(_locked) {
+      // no-op: 設定変更は許可し、次回開始時にのみ反映する
+    }
+
+    function startSessionSnapshot() {
+      sessionSeq += 1;
+      activeSession = {
+        id: sessionSeq,
+        randomOrder: !!randomOrder.checked,
+        randomOptions: !!randomOptions.checked,
+        optionOrderMap: new Map(),
+      };
     }
 
     function buildUniqueFileLabels(files) {
@@ -294,6 +304,7 @@
         ...q,
         number: idx + 1,
       }));
+      activeSession = null;
       renderJsonBlocks(questions);
       const max = Math.max(questions.length, 1);
       rangeStart.value = 1;
@@ -309,6 +320,7 @@
     function handleLoadError(message) {
       parseStatus.textContent = message;
       questions = [];
+      activeSession = null;
       renderJsonBlocks([]);
       rangeStart.value = 1;
       rangeEnd.value = 1;
@@ -352,23 +364,25 @@
 
     function getDisplayOptions(q, idx) {
       const original = getNormalizedOptions(q);
-      if (!randomOptions.checked) {
+      const useRandomOptions = !!(activeSession && activeSession.randomOptions);
+      if (!useRandomOptions) {
         return original.map((opt, i) => ({
           displayKey: opt.key || DISPLAY_KEYS[i],
           originalKey: opt.key || DISPLAY_KEYS[i],
           text: opt.text
         }));
       }
+      const orderMap = activeSession.optionOrderMap;
       const key = getOptionOrderKey(q, idx);
-      if (!optionOrderMap.has(key)) {
+      if (!orderMap.has(key)) {
         const shuffled = original.slice();
         for (let i = shuffled.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
-        optionOrderMap.set(key, shuffled);
+        orderMap.set(key, shuffled);
       }
-      const shuffled = optionOrderMap.get(key);
+      const shuffled = orderMap.get(key);
       return shuffled.map((opt, i) => ({
         displayKey: DISPLAY_KEYS[i] ?? opt.key,
         originalKey: opt.key,
@@ -759,16 +773,11 @@
         }
       }
       applyLoadedQuestionSets(fileEntries);
-      optionOrderMap = new Map();
       setShuffleControlsLocked(false);
     }
 
     jsonFile.onchange = () => {
       loadSelectedFiles();
-    };
-
-    randomOptions.onchange = () => {
-      optionOrderMap = new Map();
     };
 
     showKey.onchange = () => {
@@ -873,7 +882,8 @@
     }
 
     function applyRandomOrder(list) {
-      if (!randomOrder.checked) return list;
+      const useRandomOrder = !!(activeSession && activeSession.randomOrder);
+      if (!useRandomOrder) return list;
       const shuffled = list.slice();
       for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -892,6 +902,7 @@
         parseStatus.textContent = '指定した問題番号/問題IDが見つかりません。';
         return;
       }
+      startSessionSnapshot();
       setShuffleControlsLocked(true);
       const mode = modeSelect.value;
       if (mode === 'practice') {
